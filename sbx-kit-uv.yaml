@@ -1,0 +1,93 @@
+# syntax=docker/sandbox-kit:3
+schemaVersion: "3"
+kind: mixin
+displayName: uv (Python package manager)
+author: "Ajeet Singh Raina"
+description: >-
+  Adds Astral's uv (and uvx) to any agent sandbox as a portable overlay. uv is
+  an extremely fast Python package and project manager. It ships the static
+  musl binaries in /usr/local/bin, opens egress to PyPI and to the Python build
+  hosts uv fetches from, and runs `uv --version` on startup as a health check.
+sourceUrl: https://github.com/astral-sh/uv
+licenses: [Apache-2.0, MIT]
+
+# One value drives everything: the install, the matchable provide, the
+# published version (org.opencontainers.image.version) and the release tag.
+# This is the canonical "pin the tool, say it once" pattern.
+#
+# NB: this is the OPPOSITE choice from the scout kit, which defaulted to
+# `latest` and therefore separated its own kit version from the tool version
+# and shipped no `provides`. Because uv is PINNED here, it can honestly assert
+# a specific `uv@<version>` capability that a lower-bound constraint will match.
+version: "${{ kit.args.uvVersion }}"
+
+args:
+  uvVersion:
+    default: "0.12.19"
+    pattern: '^[0-9]+\.[0-9]+\.[0-9]+$'
+    description: uv release to install (semver, e.g. 0.12.19)
+    buildArg: UV_VERSION
+
+# A pinned install is a claim about content, so we advertise it. The dockerfile
+# re-reads `uv --version` and fails the build on mismatch, which is what makes
+# this provide trustworthy rather than an unchecked assertion.
+provides: ["uv@${{ kit.args.uvVersion }}"]
+
+# No `requires`. We ship the fully static musl builds of uv/uvx, so the overlay
+# has no shared-library closure and depends on nothing from the composed base:
+# no interpreter, no package manager, no libc. `requires` is a hard, closed-set
+# precondition on EVERY composition, so declaring anything here would make the
+# kit refuse to compose on bases it would in fact run on perfectly. The silence
+# is deliberate — do not add entries for what the build stage happens to shell
+# out to (curl/tar run at build time, not in the sandbox).
+
+capabilities:
+  # Egress the RUNNING agent needs. This is the `runtime` phase only: uv itself
+  # is installed at build time (see the dockerfile), so the install hosts
+  # (astral.sh, github.com release assets) are reached by `docker buildx build`,
+  # not by the sandbox, and do not belong in this policy.
+  - type: com.docker.sandbox/network-policy@1
+    config:
+      runtime:
+        allow:
+          # PyPI: the Simple/JSON index uv resolves against.
+          - pypi.org
+          # The PyPI CDN that serves the actual wheels and sdists.
+          - files.pythonhosted.org
+          # `uv python install` / auto-provisioning downloads standalone Python
+          # builds from the astral-sh/python-build-standalone GitHub release,
+          # which redirects to the GitHub asset CDN. Drop these two if you only
+          # ever install packages against a Python already on the base.
+          - github.com
+          - objects.githubusercontent.com
+
+  # `uv --version` on startup as a health check. Runs as the agent user because
+  # that is who invokes uv in the session. The hook environment is
+  # deny-by-default, so every variable uv (and any child fetch) may read is
+  # declared: HOME/PATH to find the binary and uv's XDG cache/config, the proxy
+  # variables so outbound resolution goes through the sandbox proxy, and the CA
+  # variables so it trusts the proxy's certificate.
+  - type: com.docker.sandbox/lifecycle@1
+    config:
+      startup:
+        - command: |
+            echo "[uv kit] uv version:"
+            uv --version
+          user: agent
+          env:
+            - HOME
+            - PATH
+            - HTTP_PROXY
+            - HTTPS_PROXY
+            - NO_PROXY
+            - http_proxy
+            - https_proxy
+            - no_proxy
+            - SSL_CERT_FILE
+            - SSL_CERT_DIR
+            - CURL_CA_BUNDLE
+          description: Report uv version as a startup health check
+
+  - type: com.docker.sandbox/agent-context@1
+    config:
+      contentFile: ./uv-context.md
