@@ -4,11 +4,6 @@ A Docker Sandboxes kit (v3 format) that adds **uv**, Astral's fast Python
 package and project manager, to any agent sandbox. It is a mixin, so you layer
 it onto any agent: claude, codex, copilot, opencode, or a plain shell.
 
-This repo is a teaching example modelled on
-[sbx-kits-scout](https://github.com/ajeetraina/sbx-kits-scout). It shows the
-same five files a v3 mixin needs — plus the version-**pinning** pattern that
-scout deliberately skipped (scout floated on `latest`; uv pins, so it can
-honestly advertise a matchable `uv@<version>` capability).
 
 ## The files a v3 kit needs
 
